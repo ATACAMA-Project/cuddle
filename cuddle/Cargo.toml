@@ -5,6 +5,11 @@ edition = "2021"
 description = "A library to parse and validate CDDL and CBOR."
 license-file = "../LICENSE"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
+base64 = "0.21.0"
+ciborium = "0.2.0"
+either = "1.8.0"
+lazy_static = "1.4.0"
+nom = "7.1.2"
+nom_locate = "4.1.0"
+thiserror = "1.0.38"

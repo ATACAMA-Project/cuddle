@@ -1,0 +1,16 @@
+[package]
+name = "tests"
+version = "0.0.0"
+edition = "2021"
+description = "A test cargo project."
+publish = false
+
+[dependencies]
+cuddle = { path = "../cuddle" }
+
+[dev-dependencies]
+test-generator = "0.3.1"
+
+[[test]]
+name = "fixtures"
+path = "fixtures.rs"

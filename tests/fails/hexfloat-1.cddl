@@ -1,0 +1,2 @@
+; An hexfloat without an exponent part should fail.
+start = 0xABC.DEF

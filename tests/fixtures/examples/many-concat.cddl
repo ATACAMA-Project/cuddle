@@ -1,0 +1,1612 @@
+; A delegation certificate. The resolution of the `From` identity must follow
+; the same rules as a regular message, for this envelope.
+delegation-certificate = COSE_Sign<{
+   ; From. The address of the delegated identity (`Alice` in the example).
+   0 => address,
+
+   ; To. The address of the identity that can use the above identity (`Bob` in
+   ; the example).
+   1 => address,
+
+   ; An expiration timestamp. If the system time is past this timestamp,
+   ; the certificate is invalid and the server MUST return an error without
+   ; opening the envelope further.
+   2 => time,
+
+   ; A description or message about this certificate.
+   ? 3 => memo,
+
+   ; Whether or not this MUST be the final certificate (no sub-delegation
+   ; allowed).
+   ? 4 => bool,
+}>
+; tag::request[]
+; A request message.
+request = COSE_Sign<{
+    ; Protocol version. This is 1 by default.
+    ? 0 => uint,
+
+    ; Message originator (From). If anonymous, this field can be omitted.
+    ; This can also be omitted if the envelope only contains 1 signature and
+    ; public key.
+    ? 1 => address,
+
+    ; Message destination (To). If omitted or anonymous, the first server who
+    ; receives this message should assume he is the destination. If different
+    ; than the server receiving the message, the server is allowed to reject
+    ; the message, or proxy/forward it. That behaviour is the same when using
+    ; an anonymous address as destination.
+    ? 2 => address,
+
+    ; Endpoint name.
+    3 => text,
+
+    ; Argument, as an opaque byte string. See endpoints for implementation.
+    ? 4 => bstr,
+
+    ; The timestamp of this message. A network can reject messages too far in the
+    ; future or the past.
+    5 => time,
+
+    ; Optional ID number (up to 64 bits). This will be returned in the response and
+    ; can be used to tag messages for async communication. This is different from
+    ; the Nonce as it is returned.
+    ? 6 => uint,
+
+    ; Nonce. This is ignored by the server and can be dropped by reverse proxies.
+    ; This can be used to avoid replay errors when a client has to send the same
+    ; message multiple times really quickly.
+    ? 7 => bstr,
+
+    ; Attributes. An optional list of request attributes defined in the spec. See
+    ; the list of all attributes in this repo.
+    ? 8 => [ * attribute ],
+}>
+; end::request[]
+
+; tag::response[]
+; Every request MUST return a response, even if empty.
+response = COSE_Sign<{
+    ; Protocol version. This is 1 by default.
+    ? 0 => uint,
+
+    ; Response originator (From). This SHOULD BE the request destination, but
+    ; can differ when proxying or depending on attributes.
+    1 => address,
+
+    ; Message destination (To). This SHOULD BE the request originator, but can
+    ; differ depending on attributes. It should be checked by the client before
+    ; assuming the response is for itself. If anonymous or omitted, the client
+    ; should assume it is the intended recipient.
+    ? 2 => address,
+
+    ; Skipping 3 so that fields from Request and Response matches their
+    ; "equivalent" index. 3 in Request is `endpoint` which doesn't exist in the
+    ; response.
+
+    ; The type of the return will indicate if it is an error or a success.
+    ; If this is a bytestring, it contains the return value of a successful
+    ; request.
+    ; If this is a map, it contains the error code, optional text and
+    ; optional arguments.
+    (
+        4 => bstr .cbor any / bstr .size 0
+        //
+        4 => error
+    ),
+
+    ; A timestamp of the response. This is when the response was generated, but
+    ; might not be close to the timestamp of the request message (for example, if
+    ; using some request/response mailbox). This shouldn't invalidate the response
+    ; itself.
+    5 => time,
+
+    ; If an ID was passed as the request, the same ID should be returned here.
+    ? 6 => uint,
+
+    ; Attributes. An optional list of response attributes defined in the spec. See
+    ; the list of all attributes in this repo.
+    ? 8 => [ * attribute ],
+}>
+; end::response[]
+
+; tag::error[]
+; An error type, representing an error and its description.
+; Error codes are specified in the MANY specification, with negative error codes reserved
+; for attributes and spec defined errors, and positive codes reserved for application
+; specific errors.
+; See [../errors.adoc].
+error = reason<int>
+
+; A reason is a more generic type to a string that is both parseable by scripts and human
+; readable.
+reason<T> = {
+    ; Code.
+    0 => T,
+
+    ; Optional error description. This MUST be provided if the error code is not defined
+    ; in the MANY specification. The string can contain replacement of the format
+    ; `{arg_name}` (a `{` character, followed by any non-space characters, followed by
+    ; a `}` character), which should be replaced by the value in the argument map.
+    ; To use an actual `{` character, replace with `{{`, and same with `}` and `}}`.
+    ; Note that `{}` is a valid replacement string.
+    ; If an argument is not in the map, it should be replaced with an empty string.
+    ? 1 => tstr,
+
+    ; An optional string to string argument map. More arguments may be provided than
+    ; needed in the description.
+    ? 2 => {
+        tstr => tstr
+    },
+}
+; end::error[]
+
+; tag::address[]
+; An address is either a tagged byte string matching the address format, or a textual
+; representation of the address (which can deserialize to the byte string matching the
+; address format).
+address =
+    textual-non-anonymous-address
+    / textual-anonymous-address
+    / #6.10000(non-anonymous-address)
+    / #6.10000(anonymous-address)
+
+; A textual version of an address that is anonymous.
+textual-anonymous-address = "maa" / "maaaa"
+
+; A textual address. This does not validate the actual content of the text (ie. the
+; checksum might be wrong).
+textual-address = tstr .regexp "m[abcdefghijklmnopqrstuvwxyz234567]{2}[abcdefghijklmnopqrstuvwxyz234567]*"
+
+; An address that isn't anonymous.
+non-anonymous-address = public-key-address / subresource-address
+
+anonymous-address = h'00'
+public-key-address = bytes .cbor [ h'01', bytes .size 28 ]
+subresource-address = bytes .cbor [ h'80'..h'FF', bytes .size 28, bytes .size 3 ]
+; end::address[]
+
+; An attribute can have one or many attribute arguments.
+attribute-arg = ()
+
+; An Attribute ID, which can be used and listed by a server.
+attribute-id = attribute-id-standard / attribute-id-custom
+
+; An Attribute ID is a well-defined, approved and specified attribute described in this specification.
+attribute-id-standard = uint
+
+; A custom attribute ID is a loosely-defined, unapproved and network-specific attribute. It uses negative
+; indices.
+attribute-id-custom = nint
+
+; An attribute contains an ID and arguments.
+attribute = attribute-id / [attribute-id, * attribute-arg]
+; Generic types defined for CDDL.
+; Sorting order. This only matters if a call uses a maximum number of transactions
+; as they will be returned in the order and stopped.
+; For example, if a call lists ALL transactions, but the server returns only 100,
+; using an ASCENDING order returns the first 100, while a DESCENDING order returns
+; the last 100.
+order = (
+    indeterminate /
+    ascending /
+    descending
+)
+indeterminate = 0
+ascending = 1
+descending = 2
+
+; A bound, either upper or lower, serialized.
+bound<T> =
+    ; Unbounded.
+    []
+    ; Inclusive bound.
+    / [0, T]
+    ; Exclusive bound.
+    / [1, T]
+
+; A Range of scalar. Must specify both bounds, but can specify any bound to being
+; unbounded. If omitted, the value is unbounded.
+range<T> = {
+    ; Lower bound.
+    ? 0 => bound<T>,
+    ; Upper bound.
+    ? 1 => bound<T>,
+}
+
+; An attribute related index, which can include sub-attributes or IDs recursively.
+attribute-related-index     = attribute-id / sub-attribute-related-index
+
+; A sub-attribute related index. Sub-indices can also be custom.
+sub-attribute-related-index = [attribute-id, uint]
+                            / [attribute-id, attribute-related-index]
+
+; A memo contains a human readable portion and/or a machine readable portion.
+; The machine readable portion is expected to be CBOR, though it could be a
+; byte array containing another format.
+; A memo can contain multiple entries, as some of them might be formatted in
+; different ways, or contain additional data.
+; The memo itself CANNOT be empty and MUST contain at least one entry.
+memo = [ + (tstr / (bstr .cbor any)) ]
+
+; A burnt field is any valid CBOR value, but is used to indicate that this
+; field should not be used anymore. It is normally kept as a backward compatible
+; placeholder. Always should be used with an optional key in a map.
+burnt<T> = T
+; tag::status[]
+status@param = ()
+status@return = status
+
+status = {
+    ; Protocol version.
+    0 => uint,
+
+    ; Human readable name of this server. This is not unique.
+    ? 1 => tstr,
+
+    ; Human readable name (with potential subnames) of this network.
+    ; If omitted, the server might not be part of a network.
+    ? 6 => tstr / [ * tstr ],
+
+    ; The public key of this server, in cbor, if available.
+    ? 2 => bstr .cbor any,
+
+    ; The address of this server. This might be different from
+    ; the public key published above, or a subresource of it.
+    3 => address,
+
+    ; A list of attributes supported by this server.
+    4 => [ * attribute ],
+
+    ; A version of the server's software. This SHOULD follow
+    ; semver.
+    ? 5 => tstr,
+
+    ; A time delta where messages are allowed on this server, in seconds.
+    ; If the difference between the time of the server and the timestamp
+    ; on the message is larger than this, the message will be rejected.
+    ; A message might always be rejected if it was submitted after the
+    ; server time (in the future).
+    ; If this field is missing, the server does not advertize a timeout,
+    ; but it might still be enforced.
+    ? 7 => uint,
+}
+; end::status[]
+
+; tag::heartbeat[]
+heartbeat@param = ()
+heartbeat@return = ()
+; end::heartbeat[]
+
+; tag::endpoints[]
+endpoints@param = ()
+endpoints@return = {
+    * tstr => endpoint-info,
+}
+
+; Information related to
+endpoint-info = {
+    ; Whether this endpoint is a command (true) or query (false). See
+    ; endpoints.adoc for more information.
+    0 => bool,
+}
+; end::endpoints[]
+
+; tag::result[]
+result@param = {
+  ; A token returned by an async attribute.
+  ? 0 => bstr,
+}
+result@result = bstr .cbor request;
+; end::async[]
+; tag::types[]
+; A message in a block.
+; `request` type is defined in the MANY protocol's CDDL. It should include the protected
+; header, payload and signature. A blockchain MAY drop the unprotected header to save
+; on block size.
+message = bstr .cbor request
+
+; A block query, which can contain either a hash, index (or height) or time.
+; This targets a single block. Since multiple blocks might have been created
+; at the same time, this cannot include a time value (use a ranged block
+; query instead).
+single-block-query = {
+    ; A hash of a block. The length and algorithm is implementation specific.
+    0 => bstr
+    ; A specific height.
+    // 1 => uint
+}
+
+; A block query over a range of height or time. This cannot be a hash or
+; specific height (use `blockchain.block` for specific height/hash).
+range-block-query =
+    ; Height range.
+    { 1 => range<uint> }
+    ; Time value or time range.
+    / { 2 => range<time> }
+
+; A block identifier, as a way to target a block. This matches loosely the fields
+; of single-block-query.
+block-identifier = {
+    ; Hash of the block.
+    0 => bstr,
+
+    ; Height of the block. This cannot be 0, unless the block is the genesis
+    ; block (see genesis-block-identifier).
+    1 => uint,
+}
+
+; A genesis block identifier. This should be used as the parent of a
+genesis-block-identifier = {
+    0 => bstr .size 0,
+    1 => 0,
+}
+
+; A query for a single transaction.
+single-transaction-query =
+    ; A transaction hash.
+    { 0 => bstr }
+    ; A block + transaction index.
+    / { 1 => [ single-block-query, uint ] }
+
+; A unique identifier for the transaction on this network.
+transaction-identifier = {
+    ; A hash value of the transaction.
+    0 => bstr,
+}
+
+; A transaction, which should be a message. Some metadata can be added.
+transaction = {
+    ; The identifier of the transaction.
+    0 => transaction-identifier,
+
+    ; The content of the transaction. This should be a MANY request.
+    ; If this field is missing, use the `block.request` endpoint.
+    ; If this field is there but empty (not a request), the transaction is
+    ; empty or metadata-only (implementation specific).
+    ? 1 => bstr .cbor request / bstr .size 0,
+
+    ; The response for the transaction. This should be a MANY response.
+    ; If this field is missing, use the `block.response` endpoint.
+    ; If this field is empty, the transaction is empty or metadata-only
+    ; (implementation specific).
+    ? 2 => bstr .cbor response / bstr .size 0,
+
+    ; Additional fields are okay here as metadata, as long as keys are strings.
+    tstr => any,
+}
+
+; A block. Blocks contain an array of transactions, and a parent block.
+; Blocks MUST be immutable and cacheable. If two block-identifier are the same,
+; the blocks their query MUST be the same as well (including meta-data).
+block = {
+    ; The block identifier.
+    0 => block-identifier,
+
+    ; The parent block identifier. If this is a genesis-block-identifier, this
+    ; specific block is the oldest in the chain. Request a genesis block
+    ; identifier should return a block unknown error.
+    ; If this field is missing, then the parent is not part of the retained
+    ; blocks, and cannot be queried. It is _not_ a genesis block.
+    ? 1 => block-identifier / genesis-block-identifier,
+
+    ; The application hash value after this block was executed.
+    ? 2 => bstr,
+
+    ; Time the block was created.
+    3 => time,
+
+    ; Total number of transactions.
+    4 => uint,
+
+    ; Transactions / Messages sent through this block. If the response is larger
+    ; than the maximum message size, the transaction content might be skipped.
+    ; The server MAY provide transaction hashes instead as a separate key.
+    (
+        5 => [ * transaction ]
+        //
+        6 => [ * bstr ],
+    )
+
+    ; Additional fields are okay here as metadata, keys MUST be strings.
+    * tstr => any,
+}
+; end::types[]
+
+; tag::info[]
+; The blockchain.info endpoint returns information about the current state of this
+; blockchain.
+blockchain.info@param = ()
+
+blockchain.info@return = {
+    ; The latest block identifier.
+    0 => block-identifier,
+
+    ; If a server with a state is running behind the blockchain, this is the
+    ; hash of the state.
+    ? 1 => bstr,
+
+    ; The earliest height that is queryable from the blockchain. A blockchain is
+    ; allowed to remove old block information. If this information is missing,
+    ; the blockchain might not know ahead of time and should be queried.
+    ? 2 => uint,
+}
+; end::info[]
+
+; tag::block[]
+; The blockchain.block endpoint returns a single block from the blockchain.
+blockchain.block@param = {
+    ; A single block query.
+    0 => single-block-query,
+}
+
+blockchain.block@return = {
+    ; The block being requested.
+    0 => block,
+}
+; end::block[]
+
+; tag::list[]
+; The blockchain.list endpoint query the list of blocks and returns multiple blocks with their
+; summaries.
+blockchain.list@param = {
+    ; Maximum number of blocks to return. The server can still limit the number of
+    ; blocks it returns if this number is high.
+    ? 0 => uint,
+
+    ; Whether or not to show the last events or the first ones found (ordering).
+    ; The default behaviour is left to the server implementation.
+    ; Ordering is done by block height.
+    ? 1 => order,
+
+    ; Block filter criteria.
+    ? 2 => range-block-query,
+}
+
+blockchain.list@return = {
+    ; Latest height of the blockchain (currently).
+    0 => uint,
+
+    ; List of blocks found. This might be capped to the size of a response and return less blocks
+    ; than requested or transaction hashes instead of content.
+    1 => [ * block ],
+}
+; end::list[]
+
+; tag::transaction[]
+; The blockchain.transaction endpoint returns a single transaction by its identifier.
+blockchain.transaction@param = {
+    0 => single-transaction-query,
+}
+
+blockchain.transaction@return = {
+    0 => transaction,
+}
+; end::transaction[]
+
+; tag::request[]
+; The blockchain.request endpoint returns a request of a transaction by its identifier.
+blockchain.request@param = {
+    0 => single-transaction-query,
+}
+
+blockchain.request@return = {
+    0 => bstr .cbor request / bstr .size 0,
+}
+; end::request[]
+
+; tag::response[]
+; The blockchain.response endpoint returns a response of a transaction by its identifier.
+blockchain.response@param = {
+    0 => single-transaction-query,
+}
+
+blockchain.response@return = {
+    0 => bstr .cbor response / bstr .size 0,
+}
+; end::response[]
+; tag::types[]
+; A token symbol which is its name.
+; A symbol is an address, and CAN be an anonymous address. It is
+; unique across all networks. The given string name of a symbol is not
+; unique, though, and cannot be resolved using this attribute (a
+; separate resolver attribute is necessary).
+ledger-symbol = address
+
+; An amount of tokens can be either an infinite uint or a regular one
+; for simplicity. The networks CAN use either when serializing, but
+; MUST accept both when doing transactions.
+ledger-amount = biguint / uint
+; end::types[]
+
+; tag::info[]
+; Info endpoint.
+ledger.info@param = ()
+ledger.info@return = (ledger-info)
+
+ledger-info = {
+    ; List of supported symbols for this ledger.
+    0 => [* ledger-symbol],
+
+    ; Hash value of the ledger state. If two ledgers have the same hashes,
+    ; chances are they have the same balances on the same accounts (with
+    ; some risk of collision).
+    ; This can include configuration, depending on the implementation.
+    ; The actual hashing method and size of the hash is left to the
+    ; implementation.
+    1 => bstr,
+
+    ; Transfer fees for each symbols, between accounts.
+    ; TODO: not implemented.
+    2 => {
+        ledger-symbol => transaction-fee,
+    },
+
+    ; Conversion rates and fees between symbols.
+    ; TODO: not implemented.
+    3 => {
+        [ledger-symbol, ledger-symbol] => conversion,
+    },
+
+    ; Local human readable names for symbols.
+    ; These names are local only, and are only guaranteed to be unique on this
+    ; specific ledger.
+    4 => {
+        ; TODO: this.
+        ledger-symbol => {
+            0 => tstr,
+            1 => tstr,  ; Description
+            2 => uint, ; Number of precision digits
+            tstr => tstr ; metadata
+        }
+    }
+}
+
+; Fees can be set for each symbols independently.
+; If a symbol is missing (or empty map), transactions are free.
+; If no fixed or percent fee is specified, transactions are free.
+;
+; Percents are fixed point over 2**32, so a value of 0x100000000
+; would be 100% of fees.
+;
+; If both fixed and percent fees are specified, the calculation is
+;     TOTAL = amount + fixed + (amount * percent / 2**32)
+; Example:
+;   A token has a fixed transfer rate of 1000, and a percent of
+;   0x800000 (~0.195%).
+;   A user who wants to transfer an amount of 5_000_000, would
+;   need a balance over:
+;     5000000 + 1000 + (5000000 * 0x800000 / 0x100000000)
+;   Which is 5010765.625, rounded down to 5_010_765.
+;   So a total of 10_765 tokens as fees.
+transaction-fee = {
+    ; Fixed fees for each transactions.
+    ? 0 => ledger-amount,
+
+    ; Percent fees of the actual transfer amount, rounded down
+    ; if necessary.
+    ? 1 => fixed-point-percent,
+}
+
+; Fees between two symbols.
+conversion = {
+    ; Default value is 1 for 1.
+    ? 0 => conversion-rate,
+
+    ; How much does it cost to convert between 2 symbols.
+    ? 1 => conversion-fee,
+}
+
+; Conversion rate is a percent that will give
+conversion-rate = fixed-point-percent
+conversion-fee = transaction-fee
+
+; A percent based on 32 bits. The percent is fixed point over 32 bits,
+; so 50% would be 0x80000000, and 1% 0x28F5C28.
+fixed-point-percent = uint
+; end::info[]
+
+; tag::balance[]
+ledger.balance@param = {
+    ; Account's address. If not specified, will use the message sender.
+    ? 0 => non-anonymous-address,
+
+    ; Symbol to check (or list of symbols). Symbols will be missing from
+    ; the output if their balance is 0. If this is an empty array or
+    ; omitted, all symbols with a balance for the account will be returned.
+    ? 1 => ledger-symbol // [* ledger-symbol],
+}
+
+; Return value for "ledger.balance".
+; Contains
+ledger.balance@return = {
+    ; Balances as a record of Symbol => Amount.
+    ; Balances of zero might not be listed here.
+    0 => {
+        * ledger-symbol => ledger-amount,
+    },
+}
+; end::balance[]
+; tag::info[]
+kvstore.info@param = ()
+
+kvstore.info@return = {
+    ; Hash value of the key value state. If two stores have the same hashes,
+    ; chances are they have the same values on the same keys (with
+    ; some risk of collision).
+    ; This can include configuration, depending on the implementation.
+    ; The actual hashing method and size of the hash is left to the
+    ; implementation.
+    0 => bstr,
+}
+; end::info[]
+
+; tag::get[]
+kvstore.get@param = {
+    ; The key to get.
+    0 => bstr,
+}
+
+kvstore.get@return = {
+    ; The value directly returned.
+    ? 0 => bstr,
+}
+; end::get[]
+
+; tag::query[]
+kvstore.query@param = {
+    ; The key to query
+    0 => bstr,
+}
+
+kvstore.query@return = {
+    ; The key owner.
+    0 => non-anonymous-address,
+
+    ; Whether this key is still enabled. A server MAY choose to disable
+    ; keys for some reasons (or instead of deleting), and MAY choose to
+    ; put an error record here instead of `true`. This field is not part of
+    ; the regular error code space and should only use application-specific
+    ; codes (positive codes).
+    ; If this field is omitted, this account is enabled.
+    ? 1 => bool / reason<uint>,
+}
+; end::query[]
+; tag::types[]
+; A filter argument for event types.
+events-filter = {
+    ; Filter by address affected. Address in this context can be an identity,
+    ; a symbol, anything that is related to an address. This matches _exactly_
+    ; the identity, and does not match subresources.
+    ? 0 => address / [ * address ],
+
+    ; Filter by event type.
+    ? 1 => event-type / [ * event-type ],
+
+    ; Filter by event ID range.
+    ? 3 => range<event-id>,
+
+    ; Filter by date range.
+    ? 4 => range<time>,
+
+    ; Attribute specific values.
+    events-filter-attribute-specific
+}
+
+; Extend this type to add attribute specific filters for events.
+events-filter-attribute-specific = ()
+
+; An ID that is unique for all events in the log. This must be monotonically
+; incrementing between when events are logged.
+; The system can consider this to be a `biguint` and add 1 to the last byte to gather
+; the next item, for example.
+; Gaps between IDs can exist (they don't have to be continuous).
+event-id = bstr
+
+; Event types. This can be extended and the server MUST provide a list of
+; those types.
+event-info /= event-info-send
+event-type /= event-type-send
+
+event-type-send = [6, 0]
+
+event-info-send = {
+    0 => event-type-send,
+    1 => address,       ; Source
+    2 => address,       ; Destination
+    3 => ledger-symbol, ; Symbol
+    4 => ledger-amount, ; Amount
+}
+
+event-log = {
+    ; Event ID
+    0 => event-id,
+
+    ; Log time.
+    1 => time,
+
+    ; Depends on the event log type.
+    2 => event-info,
+}
+; end::types[]
+
+; tag::info[]
+; `events.info` endpoint.
+events.info@param = ()
+events.info@return = {
+    ; Total number of events.
+    0 => uint,
+
+    ; Supported list of event types.
+    1 => [ * event-type ],
+}
+; end::info[]
+
+; tag::list[]
+; `events.list` endpoint for listing, filtering and sorting events.
+events.list@param = {
+    ; Maximum number of events to return. The server can still limit the number of
+    ; events it returns if this number is high.
+    ? 0 => uint,
+
+    ; Whether or not to show the last events or the first ones found (ordering).
+    ; The default behaviour is left to the server implementation.
+    ; Ordering is done by event ID (which are monotonically incrementing).
+    ? 1 => order,
+
+    ; Event filter criteria.
+    ? 2 => events-filter,
+}
+events.list@return = {
+    ; Total number of events (currently). This is the same number that info
+    ; would give, but it's atomic to this call.
+    0 => uint,
+
+    ; Event log list.
+    1 => [ * event-log ]
+}
+; end::list[]
+; tag::types[]
+; A data index. Currently, custom data indices SHOULD NOT be accepted.
+data-index = attribute-related-index
+
+; A data value.
+data-value = data-value-type-counter
+           / data-value-type-gauge
+
+; The type of a data.
+data-type = data-type-counter
+          / data-type-gauge
+
+; A monotonically incrementing unsigned integer.
+data-type-counter = 0
+data-value-type-counter = uint
+
+; An integer, float or big integer.
+data-type-gauge = 1
+data-value-type-gauge = int / float / bigint
+
+data-info = {
+    ; Type.
+    0 => data-type,
+
+    ; Shortname. This is specified.
+    1 => tstr,
+}
+; end::types[]
+
+; tag::info[]
+data.info@param = ()
+
+data.info@return = {
+    ; List of supported data.
+    0 => [ * data-index ],
+}
+; end::info[]
+
+; tag::getInfo[]
+data.getInfo@param = {
+    0 => data-index // [ * data-index ],
+}
+
+data.getInfo@return = {
+    * data-index => data-info,
+}
+; end::getInfo[]
+
+; tag::query[]
+; Query one or more data.
+data.query@param = {
+    ; The index of the data to query.
+    0 => data-index // [ * data-index ],
+}
+data.query@return = {
+    * data-index => data-value,
+}
+; end::query[]
+; tag::send[]
+; Send tokens between two accounts.
+ledger.send@param = {
+    ; Account that will send the tokens (From).
+    ; If omitted, will use the message sender.
+    ; The ledger may refuse to send from a different account than
+    ; the message sender.
+    ? 0 => address,
+
+    ; The account that will receive the tokens.
+    1 => address,
+
+    ; The amount of tokens to send.
+    2 => ledger-amount,
+
+    ; The symbol to send.
+    3 => ledger-symbol,
+}
+ledger.send@return = ()
+; end::send[]
+; tag::types[]
+event-type-put = [7, 0]
+event-type-disable = [7, 1]
+
+event-type /= event-type-put
+           /  event-type-disable
+
+event-info-put = {
+    0 => event-type-put,
+    1 => bstr,                    ; Key
+    2 => bstr,                    ; Value
+    3 => non-anonymous-address    ; Key owner
+}
+
+event-info-disable = {
+    0 => event-type-disable,
+    1 => bstr,                    ; Key
+    2 => reason<u64>              ; The reason this was deleted/disabled.
+}
+
+event-info /= event-info-put
+           /  event-info-disable
+; end::types[]
+
+; tag::put[]
+kvstore.put@param = {
+    ; Key.
+    0 => bstr,
+
+    ; Value
+    1 => bstr,
+
+    ; Alternative key owner
+    ; The sender must be related to this address, e.g., account, etc.
+    ? 2 => non-anonymous-address,
+}
+
+kvstore.put@return = ()
+; end::put[]
+
+; tag::disable[]
+; Disable or delete an KEY/VALUE.
+; The KEY/VALUE cannot be reused, except by its owner
+; The server MUST return an error if the sender does not have the `"owner"` role or the `canKvStoreDisable` role for the given key
+; The server MAY choose to fully delete the KEY and its VALUE
+kvstore.disable@param = {
+    ; Key.
+    0 => bstr,
+
+    ; Alternative key owner
+    ; The sender must be related to this address, e.g., account, subresource, etc.
+    ? 1 => non-anonymous-address,
+}
+
+kvstore.disable@return = ()
+; end::disable[]
+; tag::status[]
+async-result-unknown = 0
+async-result-queued = 1
+async-result-processing = 2
+async-result-done = 3
+async-result-expired = 4
+
+async.status@param = {
+    ; A token returned by an async attribute.
+    ? 0 => bstr,
+}
+async.status@return =
+    ; The token has either never been seen or purged after expiration.
+    { 0 => async-result-unknown }
+
+    ; The token is known, but queued for processing later. This step can be skipped
+    ; by server that start processing requests immediately.
+    / { 0 => async-result-queued }
+
+    ; The token is still being executed but a result isn't known at this point.
+    / { 0 => async-result-processing }
+
+    ; The request associated with the token has a result available.
+    / {
+        0 => async-result-done,
+        1 => bstr .cbor response,
+    }
+
+    ; A result expired from the local cache and is not available anymore. This is optional
+    ; and networks may or may not keep a list of expired tokens.
+    / { 0 => async-result-expired }
+; end::status[]
+; tag::types[]
+; An account address.
+account-address = non-anonymous-address
+
+; Features might extend this.
+account-role /= "owner"
+
+; The attribute argument contains a list of all account features supported by
+; the server.
+account@attribute-arg = [ * uint ]
+
+account-feature-arg = any
+account-feature = uint / [uint, * account-feature-arg]
+
+event-info /= account-event-info-create
+           /  account-event-info-set-description
+           /  account-event-info-add-roles
+           /  account-event-info-remove-roles
+           /  account-event-info-disable
+           /  account-event-info-add-features
+event-type /= account-event-type-create
+           /  account-event-type-set-description
+           /  account-event-type-add-roles
+           /  account-event-type-remove-roles
+           /  account-event-type-disable
+           /  account-event-type-add-features
+
+account-event-type-create             = [9, 0]
+account-event-type-set-description    = [9, 1]
+account-event-type-add-roles          = [9, 2]
+account-event-type-remove-roles       = [9, 3]
+account-event-type-disable            = [9, 4]
+account-event-type-add-features       = [9, 5]
+
+account-event-info-create = {
+    0 => account-event-type-create,
+    1 => non-anonymous-address,     ; Account address
+    ? 2 => tstr,                    ; Description
+    3 => {
+        * non-anonymous-address => [ * account-role ],
+    },                              ; List of initial roles, including default ones.
+    4 => [ 1* account-feature ],    ; Features
+}
+account-event-info-set-description = {
+    0 => account-event-type-set-description,
+    1 => non-anonymous-address,     ; Account address.
+    2 => tstr,                      ; Description
+}
+account-event-info-add-roles = {
+    0 => account-event-type-add-roles,
+    1 => non-anonymous-address,     ; Account address.
+    2 => {
+        * non-anonymous-address => [ * account-role ],
+    },                              ; List of roles added.
+}
+account-event-info-remove-roles = {
+    0 => account-event-type-remove-roles,
+    1 => non-anonymous-address,     ; Account address.
+    2 => {
+        * non-anonymous-address => [ * account-role ],
+    },                              ; List of roles removed.
+}
+account-event-info-disable = {
+    0 => account-event-type-disable,
+    1 => non-anonymous-address,     ; Account address.
+    ? 2 => reason<u64>,             ; The reason this was deleted/disabled.
+}
+account-event-info-add-features = {
+    0 => account-event-type-add-features,
+    1 => non-anonymous-address,     ; Account address.
+    2 => {
+        * non-anonymous-address => [ * account-role ],
+    },                              ; List of roles to add.
+    3 => [ 1* account-feature ],    ; New features added.
+}
+; end::types[]
+
+; tag::create[]
+; Create a new account.
+account.create@param = {
+    ; A name or description of the account. This does not have to be unique.
+    ; The server is welcome to limit the name of an account in any ways it sees
+    ; fit.
+    ? 0 => tstr,
+
+    ; An optional initial list of roles. The sender of this message will be
+    ; included in the list of owners by default, even if the sender is listed
+    ; in this list.
+    ; The server MUST return an error if any role is not supported by any
+    ; feature included in the account.
+    ? 1 => {
+        * non-anonymous-address => [ * account-role ],
+    },
+
+    ; Required list of features and their arguments.
+    ; The server MUST return an error if no features are selected; an account
+    ; without features doesn't do anything and is an error.
+    ; The server MUST return an error if a combination of features on an
+    ; account is unsupported.
+    2 => [ 1* account-feature ],
+}
+account.create@return = {
+    ; The account address. Use this to contact the account directly.
+    0 => account-address,
+}
+; end::create[]
+
+; tag::setDescription[]
+; Sets the description of an account.
+account.setDescription@param = {
+    ; The address of the account.
+    0 => account-address,
+
+    ; The new name or description.
+    1 => tstr,
+}
+
+account.setDescription@return = ()
+; end::setDescription[]
+
+; tag::listRoles[]
+; List all the roles available for an account, based on its features.
+account.listRoles@param = {
+    ; The account to list identities available.
+    0 => account-address,
+}
+
+account.listRoles@return = {
+    ; The list of roles available for identities.
+    0 => [ * account-role ],
+}
+; end::listRoles[]
+
+; tag::getRoles[]
+; List the roles of an address for an account.
+account.getRoles@param = {
+    ; The account to get the roles of.
+    0 => account-address,
+
+    ; The address to get the roles from.
+    1 => non-anonymous-address / [ * non-anonymous-address ],
+}
+
+account.getRoles@return = {
+    ; The list of roles, per address.
+    0 => {
+        address => [ * account-role ],
+    }
+}
+; end::getRoles[]
+
+; tag::addRoles[]
+; Add roles to an address related to the account. Adding a role that is already
+; set to an address does nothing. The only role that must be defined all the
+; time is the "owner". Other roles can be added by features and can be listed by
+; calling the `account.listRoles` endpoint.
+account.addRoles@param = {
+    ; The account to add the role to.
+    0 => account-address,
+
+    ; A map of address with roles to add. These roles will be added to the
+    ; address, not replacing the ones it currently have.
+    1 => {
+        1* non-anonymous-address => [ * account-role ],
+    }
+}
+account.addRoles@return = ()
+; end::addRoles[]
+
+; tag::removeRoles[]
+; Remove roles from an address. If the role isn't set, this will do nothing.
+account.removeRoles@param = {
+    ; The account to remove the roles from.
+    0 => account-address,
+
+    ; A map of address with roles to remove from them.
+    1 => {
+        1* non-anonymous-address => [ * account-role ],
+    }
+}
+account.removeRoles@return = ()
+; end::removeRoles[]
+
+; tag::info[]
+; Get the information of an account. Some information might be missing if the
+; server desires it. For example, the server might restrict which identities
+; can have the list of owners.
+account.info@param = {
+    ; The address of the account to request the information of.
+    0 => account-address,
+}
+account.info@return = {
+    ; The name or description of the account.
+    ? 0 => tstr,
+
+    ; The list of roles for the account.
+    1 => {
+        1* non-anonymous-address => [ * account-role ],
+    },
+
+    ; The list of features and their argument.
+    2 => [ 1* account-feature ],
+
+    ; Whether this account is still enabled. A server MAY choose to disable
+    ; accounts for some reasons (or instead of deleting), and MAY choose to
+    ; put an error record here instead of `true`. This field is not part of
+    ; the regular error code space and should only use application-specific
+    ; codes (positive codes).
+    ; If this field is omitted, this account is enabled.
+    ? 3 => bool / reason<uint>,
+}
+; end::info[]
+
+; tag::disable[]
+; Disable or delete an account. Its address cannot be reused.
+; The server MUST return an error if the sender does not have the `"owner"` role
+; for this account.
+; The server MAY choose to fully delete the account (in which case any calls
+; to `account.info` will return an error), or disable the account.
+account.disable@param = {
+    0 => account-address,
+}
+account.disable@return = ()
+; end::disable[]
+
+; tag::addFeatures[]
+; Add features and roles to an account, in one atomic call.
+; The roles added by this call can only come from the new features
+; added in this call.
+; The server MUST return an error if roles added by this call aren't available
+; to the features listed.
+; The server MAY return an error if adding features to an account is not
+; supported.
+account.addFeatures@param = {
+    ; The account to add features to.
+    0 => account-address,
+
+    ; List of additional roles to add.
+    ? 1 => {
+        * non-anonymous-address => [ * account-role ],
+    }
+
+    ; List of features to add and their arguments.
+    ; The server MUST return an error if a feature is already available on the
+    ; account.
+    ; The server MUST return an error if a combination of features on an
+    ; account is unsupported.
+    2 => [ 1* account-feature ],
+}
+account.addFeatures@return = ()
+; end::addFeatures[]
+; tag::create-certificate[]
+; This method does not take an argument, rather using the `from` field of the message.
+delegate.createCertificate@param = {}
+
+; Returns a delegation.
+delegate.createCertificate@return = {
+    0 => delegation-certificate,
+}
+; end::create-certificate[]
+
+; tag::whoami[]
+; Returns which address the message resolves to. Useful for testing delegations.
+delegate.whoAmI@param = ()
+
+; Returns who you are.
+delegate.whoAmI@return = {
+    0 => address
+}
+; end::whoami[]
+; tag::types[]
+event-type-transfer = [13, 0]
+
+event-type /= event-type-transfer
+
+event-info-transfer = {
+    0 => event-type-transfer,
+    1 => bstr,                    ; Key
+    2 => non-anonymous-address    ; Previous owner
+    3 => non-anonymous-address    ; The new key owner
+}
+
+event-info /= event-info-transfer
+; end::types[]
+
+; tag::transfer[]
+; Transfer ownership of a key.
+kvstore.transfer@param = {
+    ; Key.
+    0 => bstr,
+
+    ; Alternative key owner
+    ; The sender must be related to this address, e.g., account, subresource, etc.
+    ? 1 => non-anonymous-address,
+
+    ; New owner. This is required.
+    2 => non-anonymous-address,
+}
+
+kvstore.transfer@return = ()
+; end::transfer[]
+; tag::types[]
+word = tstr
+idstore-recall-phrase = [2*5 word]
+idstore-address = non-anonymous-address
+idstore-credid = bstr .size (16..1023)
+idstore-pubkey = bstr .cbor COSE_Key
+; end::types[]
+
+; tag::store[]
+idstore.store@param = {
+    ; The address associated with the credential ID and public key
+    0 => idstore-address,
+
+    ; The credential ID associated with the recall phrase
+    1 => idstore-credid,
+
+    ; The public key associated with the recall phrase
+    2 => idstore-pubkey,
+}
+idstore.store@return = {
+    ; The recall phrase associated with the credential ID and public key
+    0 => idstore-recall-phrase,
+}
+; end::store[]
+
+; tag::getFromRecallPhrase[]
+idstore.getFromRecallPhrase@param = {
+    ; The recall phrase associated with the credential ID and public key
+    0 => idstore-recall-phrase,
+}
+idstore.idstore.getFromRecallPhrase@return = {
+    ; The credential ID associated with the recall phrase
+    0 => idstore-credid,
+
+    ; The public key associated with the recall phrase
+    1 => idstore-pubkey,
+}
+; end::getFromRecallPhrase[]
+
+; tag::getFromAddress[]
+idstore.getFromAddress@param = {
+    ; The public address associated with the credential ID and public key
+    0 => idstore-address,
+}
+idstore.getFromAddress@return = {
+    ; The credential ID associated with the address
+    0 => idstore-credid,
+
+    ; The public key associated with the address
+    1 => idstore-pubkey,
+}
+; end::getFromAddress[]
+
+; tag::types[]
+account-role /= "canLedgerTransact"
+; end::types[]
+; Account multisig feature API.
+; tag::types[]
+account-role /= "canMultisigSubmit"
+             /  "canMultisigApprove"
+
+account-multisig-token = bstr
+
+multisig-transaction-state /= 0  ; Pending
+                            / 1  ; Executed automatically
+                            / 2  ; Executed manually
+                            / 3  ; Withdrawn
+                            / 4  ; Expired
+
+; List of event log types added by this feature.
+; These should be listed in events.list.
+event-info /= account-multisig-event-info-submit
+           /  account-multisig-event-info-approve
+           /  account-multisig-event-info-revoke
+           /  account-multisig-event-info-execute
+           /  account-multisig-event-info-withdraw
+           /  account-multisig-event-info-set-defaults
+           /  account-multisig-event-info-expire
+
+; Set of indices for multisig event entries.
+account-event-type-multisig-submit        = [9, [1, 0]]
+account-event-type-multisig-approve       = [9, [1, 1]]
+account-event-type-multisig-revoke        = [9, [1, 2]]
+account-event-type-multisig-execute       = [9, [1, 3]]
+account-event-type-multisig-withdraw      = [9, [1, 4]]
+account-event-type-multisig-set-defaults  = [9, [1, 5]]
+account-event-type-multisig-expire        = [9, [1, 6]]
+
+event-type /= account-event-type-multisig-submit
+           /  account-event-type-multisig-approve
+           /  account-event-type-multisig-revoke
+           /  account-event-type-multisig-execute
+           /  account-event-type-multisig-withdraw
+           /  account-event-type-multisig-set-defaults
+           /  account-event-type-multisig-expire
+
+; Can filter events on multisig-transaction-state.
+events-filter-attribute-specific /= {
+    ; Filter a multisig event by its type. This is only valid for multisig
+    ; event types, otherwise should not match any event.
+    ? [ 9, [ 1, 0 ] ] => multisig-transaction-state / [ * multisig-transaction-state ]
+}
+
+account-multisig-event-info-submit = {
+    0 => account-event-type-multisig-submit,
+    1 => non-anonymous-address,         ; Submitter
+    2 => non-anonymous-address,         ; Account source
+    ? 3 => burnt<tstr>,                 ; DO NOT USE. Previous memo.
+    4 => account-multisig-transaction,  ; The transaction submitted
+    5 => account-multisig-token,        ; Token created by the submission.
+    6 => uint,                          ; The number of approvals needed.
+    7 => time,                          ; Expiration date time.
+    8 => bool,                          ; Whether to automatically execute.
+    ? 9 => burnt<bstr>,                 ; DO NOT USE. Previous memo.
+    ? 10 => memo,                       ; Memo of the transaction
+}
+account-multisig-event-info-approve = {
+    0 => account-event-type-multisig-approve,
+    1 => non-anonymous-address,         ; Account source
+    2 => account-multisig-token,        ; Token created by the submission
+    3 => non-anonymous-address,         ; Approver
+}
+account-multisig-event-info-revoke = {
+    0 => account-event-type-multisig-revoke,
+    1 => non-anonymous-address,         ; Account source
+    2 => account-multisig-token,        ; Token created by the submission
+    3 => non-anonymous-address,         ; Revoker
+}
+account-multisig-event-info-execute = {
+    0 => account-event-type-multisig-execute,
+    1 => non-anonymous-address,         ; Account source
+    2 => account-multisig-token,        ; Token created by the submission
+    ? 3 => address,                     ; Executer. This is omitted if the execution was automatic.
+    4 => response,                      ; The response message from executing this transaction.
+}
+account-multisig-event-info-withdraw = {
+    0 => account-event-type-multisig-withdraw,
+    1 => non-anonymous-address,         ; Account source
+    2 => account-multisig-token,        ; Token created by the submission
+    3 => non-anonymous-address,         ; Withdrawer
+}
+account-multisig-event-info-set-defaults = {
+    0 => account-event-type-multisig-set-defaults,
+    1 => non-anonymous-address,         ; Instigator of the transaction.
+    2 => non-anonymous-address,         ; Account to change the multisig defaults.
+    ? 3 => null / uint,                 ; The number of approvals needed. Use null to reset
+                                        ; this default to its default value.
+    ? 4 => null / time,                 ; Expiration date time. Use null to reset this default
+                                        ; to its default value.
+    ? 5 => null / bool,                 ; Whether to automatically execute. Use null to reset
+                                        ; this default to its default value.
+}
+account-multisig-event-info-expire = {
+    0 => account-event-type-multisig-expire,
+    1 => non-anonymous-address,         ; Account source
+    2 => account-multisig-token,        ; Token created by the submission
+    3 => time,                          ; The time this transaction expired.
+}
+
+; Transactions that can be submitted, approved and executed. Not all transactions are supported
+; by multisig.
+; TODO: find a better place for these to live. We cannot just keep updating this file everytime
+; we have a new transaction type.
+account-multisig-transaction /=
+       { 0 => event-type-send, 1 => ledger.send@param }
+    /  { 0 => account-event-type-create, 1 => account.create@param }
+    /  { 0 => account-event-type-set-description, 1 => account.setDescription@param }
+    /  { 0 => account-event-type-add-roles, 1 => account.addRoles@param }
+    /  { 0 => account-event-type-remove-roles, 1 => account.removeRoles@param }
+    /  { 0 => account-event-type-disable, 1 => account.disable@param }
+    /  { 0 => account-event-type-add-features, 1 => account.addFeatures@param }
+    /  { 0 => account-event-type-multisig-submit, 1 => account.multisigSubmitTransaction@param }
+    /  { 0 => account-event-type-multisig-approve, 1 => account.multisigApprove@param }
+    /  { 0 => account-event-type-multisig-revoke, 1 => account.multisigRevoke@param }
+    /  { 0 => account-event-type-multisig-execute, 1 => account.multisigExecute@param }
+    /  { 0 => account-event-type-multisig-withdraw, 1 => account.multisigWithdraw@param }
+    /  { 0 => account-event-type-multisig-set-defaults, 1 => account.multisigSetDefaults@param }
+; end::types[]
+
+; tag::feature[]
+; The feature argument when creating a new account.
+multisig@account-feature@argument = {
+    ; Threshold of number of approvals needed by default to execute a transaction.
+    ; This number can be overridden to be greater than the default per transaction,
+    ; but cannot be overridden to be less.
+    ; This number includes the submitter of a transaction, meaning that the value of
+    ; this field is always at least 1 (passing `0` will fail creating the account).
+    ; If this value is greater than the number of people with either the
+    ; `canMultisigApprove` or `canMultisigSubmit` role the server MAY still create
+    ; the account.
+    ; By default this is the number of identities with either the
+    ; `canMultisigApprove` or `canMultisigSubmit` role.
+    ? 0 => uint,
+
+    ; The time (in seconds) a transaction would automatically expire. The server is
+    ; allowed to clamp this value, or refuse to create an account if this is too
+    ; large.
+    ? 1 => uint,
+
+    ; If true, transactions will be executed automatically when the threshold is
+    ; met.
+    ; By default the `account.multisigExecute` must be called by an owner or the
+    ; creator of the transaction.
+    ; Server MAY return an error if this is true and it doesn't support automatic
+    ; execution.
+    ? 2 => bool,
+}
+; end::feature[]
+
+; tag::setDefaults[]
+; Update default values for new transactions.
+; The server MUST return an error if the sender does not have the `owner` role.
+account.multisigSetDefaults@param = {
+    ; The account to set the new defaults.
+    0 => non-anonymous-address,
+
+    ; A new default threshold.
+    ? 1 => uint,
+
+    ; A new time (in seconds) to automatically expire transactions.
+    ? 2 => uint,
+
+    ; If true/false, update whether transactions are automatically executed.
+    ; Server MAY return an error if it doesn't support automatic execution.
+    ? 3 => bool,
+}
+
+account.multisigSetDefaults@return = ()
+; end::setDefaults[]
+
+; tag::submitTransaction[]
+; Submit a transaction to be executed when the threshold is reached.
+account.multisigSubmitTransaction@param = {
+    ; The account to submit the transaction to.
+    0 => non-anonymous-address,
+
+    ; DO NOT USE. Previous memo.
+    ? 1 => burnt<tstr>,
+
+    ; The transaction to send. Must be a valid transaction understood by the
+    ; server.
+    ; The _from_ field (or source) of the transaction will be used to resolve
+    ; the account.
+    ; Servers MAY error on an invalid or unsupported transaction type or arguments.
+    2 => account-multisig-transaction,
+
+    ; A number of approvers for this specific transaction. The server MUST return an
+    ; error if this value is passed but the submitter does not have the `owner` role.
+    ? 3 => uint,
+
+    ; The time (in seconds) this transaction would automatically expire. The server is
+    ; allowed to clamp this value, or refuse to create an account if this is too
+    ; large. The server MUST return an error if this value is passed but the submitter
+    ; does not have the `owner` role.
+    ? 4 => uint,
+
+    ; Whether to execute this transaction automatically when the threshold is met.
+    ; The server MUST return an error if this value is passed but the submitter
+    ; does not have the `owner` role, or if automatic execution is not supported.
+    ? 5 => bool,
+
+    ; A CBOR associated data field.
+    ? 6 => burnt<bstr>,
+
+    ; A memo associated with the transaction.
+    ? 7 => memo,
+}
+account.multisigSubmitTransaction@return = {
+    ; A token identifying this transaction. This is an implementation specific opaque
+    ; token and can be a hash or a random or incrementing integer.
+    0 => account-multisig-token,
+}
+; end::submitTransaction[]
+
+; tag::info[]
+; Get the information of a multisig transaction.
+account.multisigInfo@param = {
+    ; The token of the transaction to get the information of.
+    0 => account-multisig-token,
+}
+
+account.multisigInfo@return = {
+    ; DO NOT USE. Previous memo.
+    ? 0 => burnt<tstr>,
+
+    ; The transaction info.
+    1 => account-multisig-transaction,
+
+    ; The submitter of the transaction.
+    2 => non-anonymous-address,
+
+    ; Approver list for this transaction, and their information.
+    3 => {
+        1* address => {
+            ; Whether they approved or not.
+            0 => bool
+        }
+    }
+
+    ; How many approvers are needed to execute this transaction.
+    4 => uint,
+
+    ; Whether to execute this transaction automatically when the threshold is met.
+    5 => bool,
+
+    ; When will this transaction expire. This is a timestamp in seconds since
+    ; Unix EPOCH.
+    6 => time,
+
+    ; DO NOT USE. Previous data.
+    ? 7 => burnt<bstr>,
+
+    ; A state of the transaction.
+    8 => multisig-transaction-state,
+
+    ; Memo sent when creating the transaction.
+    ? 9 => memo,
+}
+; end::info[]
+
+; tag::approve[]
+; Approve a transaction, adding the sender to the list of transaction approvals.
+; Approving the same transaction twice has no effect.
+; Approving a transaction that's been executed has no effect.
+account.multisigApprove@param = {
+    ; The token of the transaction to approve.
+    0 => account-multisig-token,
+}
+
+account.multisigApprove@return = ()
+; end::approve[]
+
+; tag::revoke[]
+; Revoke a transaction's approval, removing the sender to the list of transaction
+; approvals. Revoking a transaction that's not been approved has no effect.
+; Revoking a transaction that's been executed has no effect.
+account.multisigRevoke@param = {
+    ; The token of the transaction to revoke.
+    0 => account-multisig-token,
+}
+
+account.multisigRevoke@return = ()
+; end::revoke[]
+
+; tag::execute[]
+; Execute a transaction if all the approvals needed has been reached.
+; The result is the return response of the transaction. This may include an async
+; token.
+; The server MUST return an error if the sender of this message does not have the
+; `owner` role and is not the submitter of this transaction.
+account.multisigExecute@param = {
+    ; The token of the transaction to execute.
+    0 => account-multisig-token,
+}
+
+account.multisigExecute@return = response
+; end::execute[]
+
+; tag::withdraw[]
+; Withdraw a transaction submission. Any further action on the transaction
+; should return an error (or have no effect).
+; The server MUST return an error if the sender does not have the `owner` role,
+; or the one who submitted the transaction.
+account.multisigWithdraw@param = {
+    ; The token of the transaction to withdraw.
+    0 => account-multisig-token,
+}
+
+account.multisigWithdraw@return = ()
+; end::withdraw[]
+; tag::types[]
+account-role /= "canKvStorePut"
+             /  "canKvStoreDisable"
+             /  "canKvStoreTransfer"
+; end::types[]
+delegation@request-attribute-arg = delegation-certificate / [ + delegation-certificate ]
+delegation@response-attribute-arg = delegation-certificate / [ + delegation-certificate ]
