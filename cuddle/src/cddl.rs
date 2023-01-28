@@ -130,10 +130,14 @@ impl<'a> FromIterator<Input<'a>> for Comment<'a> {
 }
 
 pub enum Type<'a> {
+    /// A reference to a rule.
+    Rule(String),
     Constant(Value),
     Record(Vec<(Box<Type<'a>>, Box<Type<'a>>)>),
-    Rule(&'a Rule<'a>),
     Any,
+
+    /// Ultimately this will fail as unimplemented.
+    Unimplemented_(&'a ast::Type<'a>),
 }
 
 impl<'a> Type<'a> {
@@ -156,6 +160,9 @@ impl<'a> ValidateCbor for Type<'a> {
             Type::Any => Ok(()),
             Type::Rule(_) => {
                 todo!()
+            }
+            Type::Unimplemented_(inner) => {
+                todo!("{inner:?}")
             }
         }
     }
@@ -195,6 +202,13 @@ impl<'a> Rule<'a> {
 
     pub fn name(&self) -> &'a str {
         self.inner.identifier.0
+    }
+
+    pub fn is_typedecl(&self) -> bool {
+        match self.inner.ty {
+            Type::Rule(..) => true,
+            _ => false,
+        }
     }
 }
 
@@ -245,7 +259,12 @@ impl<'a> Cddl<'a> {
 
         for (rule, ws) in roots {
             let rule = Rule::new(current, rule)?;
-            rules.insert(rule.name(), rule);
+            let name = rule.name();
+            if rule.is_typedecl() && first.is_none() {
+                first = Some(name);
+            }
+
+            rules.insert(name, rule);
             current = &ws;
         }
 
@@ -282,13 +301,17 @@ impl<'a> Cddl<'a> {
         self.with_cddl_root_impl(cddl_root, false)
     }
 
-    pub fn validate_cbor(cbor: impl AsRef<[u8]>) -> Result<(), Error<'a>> {
-        todo!()
+    pub fn validate_cbor(&self, cbor: impl AsRef<[u8]>) -> Result<(), Error<'a>> {
+        self.validate_cbor_with(cbor, self.first)
     }
     pub fn validate_cbor_with(
+        &self,
         cbor: impl AsRef<[u8]>,
         name: impl AsRef<str>,
     ) -> Result<(), Error<'a>> {
-        todo!()
+        let cbor: Value = ciborium::de::from_reader(cbor.as_ref()).map_err(Error::InvalidCbor)?;
+        let name = name.as_ref();
+
+        todo!();
     }
 }

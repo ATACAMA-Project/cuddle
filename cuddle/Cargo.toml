@@ -5,6 +5,10 @@ edition = "2021"
 description = "A library to parse and validate CDDL and CBOR."
 license-file = "../LICENSE"
 
+[lib]
+name = "cuddle"
+path = "src/lib.rs"
+
 [dependencies]
 base64 = "0.21.0"
 ciborium = "0.2.0"

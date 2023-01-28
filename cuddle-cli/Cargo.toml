@@ -3,5 +3,11 @@ name = "cuddle-cli"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "cuddle"
+path = "src/main.rs"
+test = false
+bench = false
+
 [dependencies]
 cuddle = { path = "../cuddle", version = "0.1.0" }

@@ -20,6 +20,9 @@ pub enum Error<'a> {
 
     #[error("A CDDL rule was not found: {0}")]
     RuleNotFound(&'a str),
+
+    #[error("Provided CBOR is invalid: {0:?}")]
+    InvalidCbor(ciborium::de::Error<std::io::Error>),
 }
 
 impl<'a> Error<'a> {

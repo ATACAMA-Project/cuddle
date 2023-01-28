@@ -1,5 +1,6 @@
 extern crate test_generator;
 
+use cuddle::cddl::Cddl;
 use std::path::PathBuf;
 use test_generator::test_resources;
 
@@ -47,12 +48,24 @@ fn pass(resource: &str) {
     }
 }
 
-#[test_resources("tests/fails/**/*.cddl")]
-fn fail(resource: &str) {
+#[test_resources("tests/fails/parse/**/*.cddl")]
+fn fail_parse(resource: &str) {
     let p = PathBuf::from(format!("../{}", resource));
     assert!(p.is_file(), "Resource {resource} should be a CDDL _file_.");
     let cddl_content = std::fs::read_to_string(&p).unwrap();
     let filename = p.to_string_lossy();
     let result = cuddle::parse_cddl(&cddl_content, &filename);
     assert!(result.is_err(), "Result was not an error: {result:#?}");
+}
+
+#[test_resources("tests/fails/parse/**/*.cddl")]
+fn fail_resolve(resource: &str) {
+    let p = PathBuf::from(format!("../{}", resource));
+    assert!(p.is_file(), "Resource {resource} should be a CDDL _file_.");
+    let cddl_content = std::fs::read_to_string(&p).unwrap();
+    let filename = p.to_string_lossy();
+    let result = cuddle::parse_cddl(&cddl_content, &filename).expect("Should have parsed");
+
+    let resolved = Cddl::from_cddl_root(&result);
+    assert!(resolved.is_err(), "Result was not an error: {resolved:#?}")
 }

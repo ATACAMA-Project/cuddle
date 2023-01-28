@@ -1,0 +1,6 @@
+; Having duplicate rules with the same name should parse but fail during
+; resolution.
+start = 1
+
+start = 2
+
