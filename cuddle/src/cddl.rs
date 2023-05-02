@@ -86,6 +86,7 @@ pub trait ValidateCbor {
 }
 
 /// An identifier.
+#[derive(Copy, Clone, Debug)]
 pub struct Identifier<'a>(&'a str);
 
 impl<'a> Identifier<'a> {
@@ -101,6 +102,7 @@ impl<'a> From<&'a ast::Identifier<'a>> for Identifier<'a> {
 }
 
 /// A comment, with all endlines ignored. This can be built from a Whitespace.
+#[derive(Clone, Debug)]
 pub struct Comment<'a>(Vec<&'a str>);
 
 impl<'a> Comment<'a> {
@@ -129,6 +131,7 @@ impl<'a> FromIterator<Input<'a>> for Comment<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
 pub enum Type<'a> {
     /// A reference to a rule.
     Rule(String),
@@ -168,13 +171,14 @@ impl<'a> ValidateCbor for Type<'a> {
     }
 }
 
+#[derive(Clone, Debug)]
 struct RuleInner<'a> {
     identifier: Identifier<'a>,
     comment: Comment<'a>,
     ty: Type<'a>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Rule<'a> {
     inner: Rc<RuleInner<'a>>,
 }
@@ -226,6 +230,7 @@ impl<'a> Rule<'a> {
 /// would be lost is between a typename and its assignment sign, e.g.
 /// in `some-type ; comment\n; other comment\n = #`. Both comments here are
 /// going to be dropped from this structure.
+#[derive(Clone, Debug)]
 pub struct Cddl<'a> {
     /// Includes the top-level comment only. If there are rules without spacing
     /// to the header, this will be empty and the header comment will be linked

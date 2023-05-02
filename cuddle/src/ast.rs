@@ -1,5 +1,5 @@
 //! This module contains very low level data structures that represents the
-//! AST. To parse these types you need to use the `parser::parse_*` functions.
+//! AST. To parse these types you need to use the `parsers::parse_*` functions.
 use crate::error::Error;
 use crate::parser::Input;
 use either::Either;

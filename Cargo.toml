@@ -3,5 +3,6 @@ members = [
     "cuddle",
     "cuddle-cli",
     "cyborg",
+    "nom-cbor",
     "tests"
 ]
