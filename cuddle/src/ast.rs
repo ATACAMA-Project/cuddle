@@ -3,6 +3,7 @@
 use crate::error::Error;
 use crate::parser::Input;
 use either::Either;
+use std::path::{Path, PathBuf};
 
 /// A single, continuous whitespace or comment.
 /// In the case of the comment, this includes the end-of-line token(s) in the
@@ -84,10 +85,24 @@ pub struct GenericArg<'a> {
     pub types: Vec<(Whitespace<'a>, Type1<'a>, Whitespace<'a>)>,
 }
 
+/// A `type` from the CDDL specification.
+///
+/// ```bnf
+/// type = type1 *(S "/" S type1)
+/// ```
 #[derive(Debug, Clone)]
 pub struct Type<'a> {
+    /// First type of this type group.
     pub first: Type1<'a>,
+
+    /// List of types of this type group.
     pub types: Vec<(Whitespace<'a>, Whitespace<'a>, Type1<'a>)>,
+}
+
+impl<'a> Type<'a> {
+    pub fn iter(&'a self) -> impl Iterator<Item = &'a Type1<'a>> + 'a {
+        std::iter::once(&self.first).chain(self.types.iter().map(|(_, _, t)| t))
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -210,13 +225,12 @@ pub enum Type2<'a> {
 
 #[derive(Debug, Clone)]
 pub struct CddlRoot<'a>(
-    pub String,
+    pub PathBuf,
     pub Whitespace<'a>,
     pub Vec<(Rule<'a>, Whitespace<'a>)>,
 );
 
-pub fn parse_cddl<'a>(cddl: &'a str, filename: &'a str) -> Result<CddlRoot<'a>, Error<'a>> {
-    let fname = filename.to_string();
+pub fn parse_cddl<'a>(cddl: &'a str, filename: &'a Path) -> Result<CddlRoot<'a>, Error<'a>> {
     let input = Input::new_extra(cddl.into(), filename);
     let (rest, (header, roots)) = crate::parser::parse_cddl(input).map_err(Error::ParseError)?;
 
@@ -225,5 +239,5 @@ pub fn parse_cddl<'a>(cddl: &'a str, filename: &'a str) -> Result<CddlRoot<'a>, 
         return Err(Error::DidNotParseEntirely(rest));
     }
 
-    Ok(CddlRoot(fname, header, roots))
+    Ok(CddlRoot(filename.to_owned(), header, roots))
 }

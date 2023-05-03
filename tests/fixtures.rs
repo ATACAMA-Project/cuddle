@@ -14,8 +14,8 @@ fn pass(resource: &str) {
 
     let test_name = filename.split(".").next().unwrap();
 
-    let _cddl = cuddle::parse_cddl(&std::fs::read_to_string(&p).unwrap(), &p.to_string_lossy())
-        .expect("Could not parse CDDL");
+    let cddl_content = std::fs::read_to_string(&p).unwrap();
+    let cddl_root = cuddle::parse_cddl(&cddl_content, &p).expect("Could not parse CDDL");
 
     for entry in dir.read_dir().unwrap() {
         let entry = entry.unwrap();
@@ -33,11 +33,18 @@ fn pass(resource: &str) {
             continue;
         }
 
+        let cddl = Cddl::from_cddl_root(&cddl_root).unwrap();
         let components: Vec<&str> = filename.split(".").collect();
 
         match components.as_slice() {
-            &[_, "fail", "diag"] | &[_, "fail", _, "diag"] => {}
-            &[_, "pass", "diag"] | &[_, "pass", _, "diag"] => {}
+            &[_, "fail", "diag"] | &[_, "fail", _, "diag"] => {
+                cddl.validate_cbor(&std::fs::read(&path).unwrap())
+                    .expect_err("Expected validation error");
+            }
+            &[_, "pass", "diag"] | &[_, "pass", _, "diag"] => {
+                cddl.validate_cbor(&std::fs::read(&path).unwrap())
+                    .expect("Expected validation success");
+            }
             &[_, "cddl"] => {
                 // Ignore, this is the resource file.
             }
@@ -53,19 +60,6 @@ fn fail_parse(resource: &str) {
     let p = PathBuf::from(format!("../{}", resource));
     assert!(p.is_file(), "Resource {resource} should be a CDDL _file_.");
     let cddl_content = std::fs::read_to_string(&p).unwrap();
-    let filename = p.to_string_lossy();
-    let result = cuddle::parse_cddl(&cddl_content, &filename);
+    let result = cuddle::parse_cddl(&cddl_content, &p);
     assert!(result.is_err(), "Result was not an error: {result:#?}");
-}
-
-#[test_resources("tests/fails/parse/**/*.cddl")]
-fn fail_resolve(resource: &str) {
-    let p = PathBuf::from(format!("../{}", resource));
-    assert!(p.is_file(), "Resource {resource} should be a CDDL _file_.");
-    let cddl_content = std::fs::read_to_string(&p).unwrap();
-    let filename = p.to_string_lossy();
-    let result = cuddle::parse_cddl(&cddl_content, &filename).expect("Should have parsed");
-
-    let resolved = Cddl::from_cddl_root(&result);
-    assert!(resolved.is_err(), "Result was not an error: {resolved:#?}")
 }

@@ -8,7 +8,5 @@ edition = "2021"
 [dependencies]
 ciborium = "0.2.0"
 nom = "7.1.3"
+nom_cbor = { path = "../nom-cbor", version = "0.1.0" }
 thiserror = "1.0.38"
-
-[dev-dependencies]
-cbor-diag = "0.1.11"

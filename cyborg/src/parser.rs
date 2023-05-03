@@ -1,5 +1,9 @@
 use crate::error::Error;
-use ciborium::value::Value;
+use ciborium::value::Value as CborValue;
+use nom::branch::alt;
+use nom::combinator::eof;
+use nom::sequence::terminated;
+use nom_cbor::parsers::parse_value;
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
@@ -11,15 +15,15 @@ pub enum Variable {
     Cbor(String),
 
     /// A CBOR Value that will be embedded as is.
-    Value(Value),
+    Value(CborValue),
 }
 
 pub trait ParseExtension {
-    fn execute(&self, inner: &str, options: &ParseOptions) -> Result<Option<Value>, Error> {
-        self.call(&parse_diag(inner, options)?, options)
+    fn execute(&self, inner: &str, options: &ParseOptions) -> Result<Option<CborValue>, Error> {
+        self.call(&parse_diag_ext(inner, options)?, options)
     }
 
-    fn call(&self, _arg: &Value, _options: &ParseOptions) -> Result<Option<Value>, Error> {
+    fn call(&self, _arg: &CborValue, _options: &ParseOptions) -> Result<Option<CborValue>, Error> {
         unreachable!()
     }
 }
@@ -74,16 +78,16 @@ impl ParseOptions {
 pub mod extensions {
     use super::ParseExtension;
     use crate::error::Error;
-    use crate::parser::{parse_diag, ParseOptions, Variable};
-    use ciborium::value::Value;
+    use crate::parser::{parse_diag_ext, ParseOptions, Variable};
+    use ciborium::value::Value as CborValue;
 
     pub struct VariableReplacement;
 
     impl ParseExtension for VariableReplacement {
-        fn execute(&self, inner: &str, options: &ParseOptions) -> Result<Option<Value>, Error> {
+        fn execute(&self, inner: &str, options: &ParseOptions) -> Result<Option<CborValue>, Error> {
             match options.variables.get(inner) {
                 Some(Variable::Value(v)) => Ok(Some(v.clone())),
-                Some(Variable::Cbor(cbor)) => Ok(Some(parse_diag(cbor, options)?)),
+                Some(Variable::Cbor(cbor)) => Ok(Some(parse_diag_ext(cbor, options)?)),
                 None => Err(Error::VariableNotFound(inner.to_string())),
             }
         }
@@ -92,12 +96,12 @@ pub mod extensions {
     pub struct BstrBoxing;
 
     impl ParseExtension for BstrBoxing {
-        fn execute(&self, inner: &str, options: &ParseOptions) -> Result<Option<Value>, Error> {
-            let inner = parse_diag(&inner, options)?;
+        fn execute(&self, inner: &str, options: &ParseOptions) -> Result<Option<CborValue>, Error> {
+            let inner = parse_diag_ext(&inner, options)?;
             let mut buffer = Vec::new();
             ciborium::ser::into_writer(&inner, &mut buffer)
                 .map_err(|e| Error::Unexpected(Box::new(e)))?;
-            Ok(Some(Value::Bytes(buffer)))
+            Ok(Some(CborValue::Bytes(buffer)))
         }
     }
 }
@@ -120,7 +124,15 @@ impl Default for ParseOptions {
     }
 }
 
+pub fn parse_diag_ext(input: &str, options: &ParseOptions) -> Result<CborValue, Error> {
+    terminated(alt((parse_value,)), eof)(input)
+        .map_err(|e| Error::ParseError(e.to_string()))
+        .and_then(|v| v.1.try_into().map_err(Error::ValueError))
+}
+
 /// Parse and result
-pub fn parse_diag(input: &str, options: &ParseOptions) -> Result<Value, Error> {
-    todo!()
+pub fn parse_diag(input: &str) -> Result<CborValue, Error> {
+    terminated(parse_value, eof)(input)
+        .map_err(|e| Error::ParseError(e.to_string()))
+        .and_then(|v| v.1.try_into().map_err(Error::ValueError))
 }

@@ -6,7 +6,10 @@ pub enum Error {
     VariableNotFound(String),
 
     #[error("An error parsing the CBOR diagnostic notation occurred: {0:?}")]
-    ParseError(nom::error::Error<std::io::Error>),
+    ParseError(String),
+
+    #[error("An error evaluating a CBOR value: {0:?}")]
+    ValueError(String),
 
     #[error("An unexpected error happened: {0}")]
     Unexpected(Box<dyn std::error::Error>),

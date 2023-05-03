@@ -19,10 +19,11 @@ use nom::multi::{many0, many0_count, many1, separated_list1};
 use nom::sequence::{delimited, pair, preceded, separated_pair, terminated, tuple};
 use nom::{AsChar, IResult};
 use nom_locate::LocatedSpan;
+use std::path::Path;
 
 mod string;
 
-pub type Input<'a> = LocatedSpan<&'a str, &'a str>;
+pub type Input<'a> = LocatedSpan<&'a str, &'a Path>;
 pub type NomError<'a> = nom::error::Error<Input<'a>>;
 
 pub type CddlResult<'a, T> = IResult<Input<'a>, T, NomError<'a>>;
@@ -103,11 +104,11 @@ pub fn parse_genericarg(input: Input) -> CddlResult<GenericArg> {
 /// ```
 pub fn parse_type(input: Input) -> CddlResult<Type> {
     map(
-        tuple((
+        pair(
             parse_type1,
             many0(tuple((parse_s, char('/'), parse_s, parse_type1))),
-        )),
-        |(first, types)| Type {
+        ),
+        |first, types| Type {
             first,
             types: types.into_iter().map(|(a, _, c, d)| (a, c, d)).collect(),
         },

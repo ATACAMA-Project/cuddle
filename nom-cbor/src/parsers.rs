@@ -3,7 +3,6 @@
 //! This follows the ABNF structure found in the
 //! [RFC 8610, appendix B](https://www.rfc-editor.org/rfc/rfc8610.html#appendix-B).
 use crate::ast::{SingleWhitespace, Uint, Value, Whitespace};
-use ciborium::value::{Integer, Value as CborValue};
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take_while};
 use nom::character::complete::{
@@ -254,77 +253,123 @@ pub fn parse_value<Input>(input: Input) -> ParseResult<Input, Value<Input>>
 where
     Input: InnerInputTrait,
 {
-    alt((parse_bool, parse_number, parse_string, parse_bytes))(input)
+    alt((
+        parse_bool,
+        parse_number,
+        parse_string,
+        parse_bytes,
+        parse_map,
+    ))(input)
 }
 
+/// Parse a CBOR map.
 pub fn parse_map<Input>(input: Input) -> ParseResult<Input, Value<Input>>
 where
     Input: InnerInputTrait,
 {
     map(
         delimited(
-            alt((tag("{"), tag("{_"))),
-            separated_list0(
-                pair(parse_s, char(',')),
-                terminated(
-                    map(
-                        tuple((
-                            parse_s,
-                            parse_value_diag,
-                            parse_s,
-                            char(':'),
-                            parse_s,
-                            parse_value_diag,
-                        )),
-                        |(_, k, _, _, _, v)| (k, v),
+            char('{'),
+            pair(
+                opt(char('_')),
+                separated_list0(
+                    pair(parse_s, char(',')),
+                    terminated(
+                        map(
+                            tuple((
+                                parse_s,
+                                parse_value,
+                                parse_s,
+                                char(':'),
+                                parse_s,
+                                parse_value,
+                            )),
+                            |(_, k, _, _, _, v)| (k, v),
+                        ),
+                        parse_s,
                     ),
-                    parse_s,
                 ),
             ),
             tag("}"),
         ),
-        |pairs| Value::Map {
-            indeterminate: false,
+        |(indeterminate, pairs)| Value::Map {
+            indeterminate: indeterminate.is_some(),
             pairs,
         },
     )(input)
 }
 
-/// Parse a value, with support for maps and arrays.
-pub fn parse_value_diag<Input>(input: Input) -> ParseResult<Input, Value<Input>>
-where
-    Input: InnerInputTrait,
-{
-    alt((parse_value, parse_map /*, parse_array */))(input)
-}
-
 #[cfg(test)]
-fn assert_cbor(actual: &str, expected: CborValue) {
-    let v = parse_value_diag(actual).unwrap();
+mod tests {
+    use crate::parsers::parse_value;
+    use ciborium::value::Integer;
+    use ciborium::value::Value as CborValue;
 
-    assert_eq!(v.0, "");
-    assert_eq!(v.1.try_into(), Ok(expected));
-}
+    fn assert_cbor(actual: &str, expected: CborValue) {
+        let v = parse_value(actual).unwrap();
 
-#[test]
-fn parse_simple() {
-    assert_cbor("true", CborValue::Bool(true));
-    assert_cbor("false", CborValue::Bool(false));
-    assert_cbor("123", CborValue::Integer(123.into()));
-    assert_cbor("0", CborValue::Integer(0.into()));
-    assert_cbor("-0", CborValue::Integer(0.into()));
-    assert_cbor(
-        "18446744073709551615",
-        CborValue::Integer(Integer::try_from(18446744073709551615 as i128).unwrap()),
-    );
-    assert_cbor("-123", CborValue::Integer((-123).into()));
-    assert_cbor(
-        "-18446744073709551615",
-        CborValue::Integer(Integer::try_from(-18446744073709551615 as i128).unwrap()),
-    );
-    assert_cbor("1e2", CborValue::Integer(100.into()));
-    assert_cbor("1e10", CborValue::Integer(10000000000u64.into()));
+        assert_eq!(v.0, "");
+        assert_eq!(v.1.try_into(), Ok(expected));
+    }
 
-    assert_cbor("h'01020304'", CborValue::Bytes(vec![1, 2, 3, 4]));
-    assert_cbor("'hello'", CborValue::Bytes(b"hello".to_vec()));
+    #[test]
+    fn parse_simple() {
+        assert_cbor("true", CborValue::Bool(true));
+        assert_cbor("false", CborValue::Bool(false));
+    }
+
+    #[test]
+    fn parse_int() {
+        assert_cbor("123", CborValue::Integer(123.into()));
+        assert_cbor("0", CborValue::Integer(0.into()));
+        assert_cbor("-0", CborValue::Integer(0.into()));
+        assert_cbor(
+            "18446744073709551615",
+            CborValue::Integer(Integer::try_from(18446744073709551615 as i128).unwrap()),
+        );
+        assert_cbor("-123", CborValue::Integer((-123).into()));
+        assert_cbor(
+            "-18446744073709551615",
+            CborValue::Integer(Integer::try_from(-18446744073709551615 as i128).unwrap()),
+        );
+        assert_cbor("1e2", CborValue::Integer(100.into()));
+        assert_cbor("1e10", CborValue::Integer(10000000000u64.into()));
+
+        assert_cbor("0x0", CborValue::Integer(0.into()));
+        assert_cbor("0x01", CborValue::Integer(1.into()));
+        assert_cbor("0x5", CborValue::Integer(5.into()));
+        assert_cbor("0xFFF", CborValue::Integer(0xFFF.into()));
+
+        assert_cbor("0o03", CborValue::Integer(3.into()));
+        assert_cbor("0o7", CborValue::Integer(7.into()));
+        assert_cbor("0o777", CborValue::Integer(0o777.into()));
+
+        assert_cbor("0b0", CborValue::Integer(0.into()));
+        assert_cbor("0b1", CborValue::Integer(1.into()));
+        assert_cbor("0b001", CborValue::Integer(1.into()));
+        assert_cbor("0b1111", CborValue::Integer(0b1111.into()));
+    }
+
+    #[test]
+    fn parse_string() {
+        assert_cbor(
+            r#""hello world""#,
+            CborValue::Text("hello world".to_string()),
+        );
+    }
+
+    #[test]
+    fn parse_hash_hex() {
+        assert_cbor("h'01020304'", CborValue::Bytes(vec![1, 2, 3, 4]));
+    }
+
+    #[test]
+    fn parse_hash_txt() {
+        assert_cbor("'hello'", CborValue::Bytes(b"hello".to_vec()));
+    }
+
+    #[test]
+    fn parse_hash_b64() {
+        assert_cbor("b64'AAECAwQ='", CborValue::Bytes(vec![0, 1, 2, 3, 4]));
+    }
 }

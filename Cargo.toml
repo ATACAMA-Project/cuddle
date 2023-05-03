@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "cbor",
     "cuddle",
     "cuddle-cli",
     "cyborg",

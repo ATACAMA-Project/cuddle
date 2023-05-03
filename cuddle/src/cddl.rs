@@ -5,6 +5,7 @@ use crate::{ast, parse_cddl};
 use ciborium::value::Value;
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
+use std::path::Path;
 use std::rc::Rc;
 
 lazy_static! {
@@ -59,7 +60,7 @@ nil = #7.22
 null = nil
 undefined = #7.23
 "#,
-        "prelude",
+        Path::new("prelude"),
     )
     .unwrap()
 }
@@ -137,17 +138,20 @@ pub enum Type<'a> {
     Rule(String),
     Constant(Value),
     Record(Vec<(Box<Type<'a>>, Box<Type<'a>>)>),
+    Or(Vec<Type<'a>>),
     Any,
 
     /// Ultimately this will fail as unimplemented.
     Unimplemented_(&'a ast::Type<'a>),
 }
 
-impl<'a> Type<'a> {
-    pub fn new(ast: &'a ast::Type) -> Result<Self, Error<'a>> {
+impl<'a> From<&ast::Type<'a>> for Type<'a> {
+    fn from(value: &ast::Type<'a>) -> Self {
         todo!()
     }
 }
+
+impl<'a> Type<'a> {}
 
 impl<'a> ValidateCbor for Type<'a> {
     fn validate(&self, value: &Value, context: ValidateContext) -> Result<(), Error> {
@@ -156,7 +160,7 @@ impl<'a> ValidateCbor for Type<'a> {
                 if value == v {
                     Ok(())
                 } else {
-                    Err(Error::validation_error(value, &context))
+                    Err(Error::validation_error(value, context))
                 }
             }
             Type::Record(_) => unreachable!(),
@@ -164,6 +168,10 @@ impl<'a> ValidateCbor for Type<'a> {
             Type::Rule(_) => {
                 todo!()
             }
+            Type::Or(subrules) => subrules
+                .iter()
+                .any(|subrule| subrule.validate(value, context.clone()).is_ok())
+                .ok_or_else(|| Error::validation_error(value, context)),
             Type::Unimplemented_(inner) => {
                 todo!("{inner:?}")
             }
@@ -239,9 +247,11 @@ pub struct Cddl<'a> {
 
     /// The first rule name of the CDDL. CDDL specifies that the first rule
     /// should be used to validate CBOR.
+    /// This will be empty string if the file is empty, but this should not
+    /// happen as the parser will fail before this.
     first: &'a str,
 
-    /// The list of rules, including their comments.
+    /// The list of rules.
     rules: BTreeMap<&'a str, Rule<'a>>,
 }
 

@@ -1,6 +1,6 @@
 //! This module contains very low level data structures that represents the
 //! AST. To parse these types you need to use the `parsers::parse_*` functions.
-use crate::parsers::string::parse_string_inner;
+use crate::parsers::string::{parse_string_inner, QuoteType};
 use crate::parsers::InnerInputTrait;
 use ciborium::value::{Integer, Value as CborValue};
 use num_traits::Num;
@@ -21,20 +21,20 @@ pub enum SingleWhitespace<Input> {
 
 /// Multiple lines of white spaces and/or comments.
 /// ```
-/// # use cuddle::ast::SingleWhitespace;
-/// use cuddle::ast::SingleWhitespace::{Comment, Whitespace};
+/// # use nom_cbor::ast::SingleWhitespace;
+/// use nom_cbor::ast::SingleWhitespace::{Comment, Whitespace};
 /// let source = "   \n   ; comment\n \n ";
-/// let (rest, result) = cuddle::parser::parse_s(source.into()).unwrap();
+/// let (rest, result) = nom_cbor::parsers::parse_s(source).unwrap();
 /// assert_eq!(rest.to_string(), "");
 /// assert_eq!(
 ///     result.0.into_iter().map(|e| match e {
-///         Comment(a, b) => format!("Comment({a}, {b})"),
-///         Whitespace(a) => format!("Whitespace({a})"),
+///         Comment(a, b) => format!("Comment('{a}', '{b}')"),
+///         Whitespace(a) => format!("Whitespace('{a}')"),
 ///     }).collect::<Vec<String>>(),
 ///     &[
-///         "Whitespace(   \n   )",
-///         "Comment( comment, \n)",
-///         "Whitespace( \n )",
+///         "Whitespace('   \n   ')",
+///         "Comment(' comment', '\n')",
+///         "Whitespace(' \n ')",
 ///     ],
 /// )
 /// ```
@@ -112,7 +112,9 @@ where
                 let i: u64 = int.try_into().map_err(|e: ParseIntError| e.to_string())?;
                 let exp: u32 = exp.as_ref().parse::<u32>().map_err(|e| e.to_string())?;
                 if let Some(v) = (|| i.checked_mul(10u64.checked_pow(exp)?))() {
-                    return Ok(CborValue::Integer(Integer::from(v)));
+                    return Ok(CborValue::Integer(
+                        Integer::try_from(if sign { -(v as i128) } else { v as i128 }).unwrap(),
+                    ));
                 }
 
                 f64::from_str_radix(span.as_ref(), 10)
@@ -124,14 +126,14 @@ where
                 .map(|f| CborValue::Float(f)),
             Value::HexFloat { sign, int, .. } => todo!(),
             Value::Text(inner) => Ok(CborValue::Text(
-                parse_string_inner(inner)
+                parse_string_inner(QuoteType::Double)(inner)
                     .map_err(|e: nom::Err<nom::error::Error<Input>>| e.to_string())?
                     .1,
             )),
             Value::Bytes(inner) => {
-                eprintln!("{}", inner.as_ref());
+                eprintln!(". {:?}", inner.as_ref());
                 Ok(CborValue::Bytes(
-                    parse_string_inner(inner)
+                    parse_string_inner(QuoteType::Single)(inner)
                         .map_err(|e: nom::Err<nom::error::Error<Input>>| e.to_string())?
                         .1
                         .into_bytes(),
@@ -194,9 +196,9 @@ where
     fn try_into(self) -> Result<u64, Self::Error> {
         match self {
             Uint::Uint(i) => i.as_ref().parse(),
-            Uint::HexUint(i) => todo!(),
-            Uint::OctUint(i) => todo!(),
-            Uint::BinUint(i) => todo!(),
+            Uint::HexUint(i) => u64::from_str_radix(i.as_ref(), 16),
+            Uint::OctUint(i) => u64::from_str_radix(i.as_ref(), 8),
+            Uint::BinUint(i) => u64::from_str_radix(i.as_ref(), 2),
         }
     }
 }

@@ -1,17 +1,3 @@
-//! This is an example from the NOM recipe book. You can find it at
-//! https://raw.githubusercontent.com/rust-bakery/nom/main/examples/string.rs
-//! It has been adapted to return a string reference and defer the parsing.
-//! A parsers is available in `cddl/string.rs`.
-use crate::parser::Input;
-use nom::branch::alt;
-use nom::bytes::streaming::{is_not, take_while_m_n};
-use nom::character::streaming::{char, multispace1};
-use nom::combinator::{map, map_opt, map_res, recognize, value};
-use nom::error::{FromExternalError, ParseError};
-use nom::multi::{fold_many0, many0_count, many1};
-use nom::sequence::{delimited, preceded};
-use nom::IResult;
-
 pub use nom_cbor::parsers::string::*;
 
 // /// Parse a string. Use a loop of parse_fragment and push all of the fragments
