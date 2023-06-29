@@ -83,7 +83,7 @@ impl<'a> ValidateContext<'a> {
 
 /// Allow for validation of a CBOR value against a rule.
 pub trait ValidateCbor {
-    fn validate(&self, value: &Value, context: ValidateContext) -> Result<(), Error>;
+    fn validate(&self, value: &Value, context: &ValidateContext) -> Result<(), Error>;
 }
 
 /// An identifier.
@@ -154,7 +154,7 @@ impl<'a> From<&ast::Type<'a>> for Type<'a> {
 impl<'a> Type<'a> {}
 
 impl<'a> ValidateCbor for Type<'a> {
-    fn validate(&self, value: &Value, context: ValidateContext) -> Result<(), Error> {
+    fn validate(&self, value: &Value, context: &ValidateContext) -> Result<(), Error> {
         match self {
             Type::Constant(v) => {
                 if value == v {
@@ -170,8 +170,9 @@ impl<'a> ValidateCbor for Type<'a> {
             }
             Type::Or(subrules) => subrules
                 .iter()
-                .any(|subrule| subrule.validate(value, context.clone()).is_ok())
-                .ok_or_else(|| Error::validation_error(value, context)),
+                .map(|subrule| subrule.validate(value, &context))
+                .find(|result| result.is_ok())
+                .ok_or_else(|| Error::validation_error(value, context))?,
             Type::Unimplemented_(inner) => {
                 todo!("{inner:?}")
             }
@@ -201,7 +202,7 @@ impl<'a> Rule<'a> {
             ast::Rule::Typename(identifier, _, _, _, _, ty) => Ok(RuleInner {
                 identifier: identifier.into(),
                 comment,
-                ty: Type::new(ty)?,
+                ty: Type::from(ty),
             }),
             ast::Rule::Groupname(_, _, _, _, _, _) => {
                 unreachable!()

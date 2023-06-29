@@ -108,7 +108,7 @@ pub fn parse_type(input: Input) -> CddlResult<Type> {
             parse_type1,
             many0(tuple((parse_s, char('/'), parse_s, parse_type1))),
         ),
-        |first, types| Type {
+        |(first, types)| Type {
             first,
             types: types.into_iter().map(|(a, _, c, d)| (a, c, d)).collect(),
         },
