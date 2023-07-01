@@ -26,7 +26,7 @@ pub enum Error<'a> {
 }
 
 impl<'a> Error<'a> {
-    pub fn validation_error(value: &Value, context: ValidateContext) -> Self {
+    pub fn validation_error(value: &Value, context: &ValidateContext) -> Self {
         Self::ValidationError(context.location(), value.clone())
     }
 }
